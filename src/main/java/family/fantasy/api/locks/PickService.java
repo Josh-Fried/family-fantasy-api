@@ -1,7 +1,7 @@
 package family.fantasy.api.locks;
 
 import org.springframework.stereotype.Service;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Service
 public class PickService {
@@ -17,7 +17,7 @@ public class PickService {
     public Pick submitPick(PickEntry pickEntry, Long matchupId, String selectedTeam) {
         Matchup matchup = matchupRepository.findById(matchupId)
             .orElseThrow(() -> new RuntimeException("Matchup not found"));
-        if (LocalDateTime.now().isAfter(matchup.getKickoffTime())) {
+        if (OffsetDateTime.now().isAfter(matchup.getKickoffTime())) {
             throw new RuntimeException("Too late to pick. The game has already kicked off.");
         }
         Pick pick = new Pick(pickEntry, matchup, selectedTeam);

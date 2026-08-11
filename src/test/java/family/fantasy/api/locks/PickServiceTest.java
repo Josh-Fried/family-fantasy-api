@@ -5,10 +5,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -30,7 +32,7 @@ public class PickServiceTest {
     @Test
     void submitPick_BeforeKickoff_SavesPick() {
         PickEntry entry = new PickEntry();
-        Matchup futureMatchup = new Matchup(2026, 1, "Bills", "Dolphins", LocalDateTime.now().plusDays(1));
+        Matchup futureMatchup = new Matchup(2026, 1, "Bills", "Dolphins", OffsetDateTime.now().plusDays(1), anyInt(),  anyInt(),  anyString(),  anyString());
         when(matchupRepository.findById(1L)).thenReturn(Optional.of(futureMatchup));
         
         pickService.submitPick(entry, 1L, "Bills");
@@ -45,7 +47,7 @@ public class PickServiceTest {
     @Test
     void submitPick_AfterKickoff_ThrowsException() {
         PickEntry entry = new PickEntry();
-        Matchup pastMatchup = new Matchup(2026, 1, "Bills", "Dolphins", LocalDateTime.now().minusHours(1));
+        Matchup pastMatchup = new Matchup(2026, 1, "Bills", "Dolphins", OffsetDateTime.now().minusHours(1), anyInt(),  anyInt(),  anyString(),  anyString());
         when(matchupRepository.findById(1L)).thenReturn(Optional.of(pastMatchup));
 
         assertThrows(RuntimeException.class, () -> {

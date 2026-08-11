@@ -8,4 +8,5 @@ import java.util.List;
 public interface PickRepository extends JpaRepository<Pick, Long> {
     List<Pick> findByPickEntryId(Long pickEntryId);
     List<Pick> findByPickEntryIdAndMatchupWeekNumber(Long pickEntryId, Integer weekNumber);
+    List<Pick> findByMatchupId(Long matchupId);
 }

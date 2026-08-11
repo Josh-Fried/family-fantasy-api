@@ -5,9 +5,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -25,7 +26,7 @@ public class MatchupServiceTest {
      */
     @Test
     void setMatchupResult_ValidMatchup_UpdatesWinningTeam() {
-        Matchup mockMatchup = new Matchup(2026, 1, "Bills", "Dolphins", LocalDateTime.now());
+        Matchup mockMatchup = new Matchup(2026, 1, "Bills", "Dolphins", OffsetDateTime.now(), anyInt(),  anyInt(),  anyString(),  anyString());
         when(matchupRepository.findById(1L)).thenReturn(Optional.of(mockMatchup));
         when(matchupRepository.save(mockMatchup)).thenReturn(mockMatchup);
 
