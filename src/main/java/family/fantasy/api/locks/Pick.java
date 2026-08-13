@@ -1,16 +1,10 @@
 package family.fantasy.api.locks;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.Table;
+import family.fantasy.api.core.User;
+import jakarta.persistence.*;
 
 @Entity
-@Table(name = "picks", schema = "pick_em_schema")
+@Table(name = "picks")
 public class Pick {
 
     @Id
@@ -18,8 +12,8 @@ public class Pick {
     private Long id;
 
     @ManyToOne
-    @JoinColumn(name = "entry_id", nullable = false)
-    private PickEntry pickEntry;
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
 
     @ManyToOne
     @JoinColumn(name = "matchup_id", nullable = false)
@@ -28,14 +22,13 @@ public class Pick {
     @Column(nullable = false)
     private String selectedTeam;
 
-    @Column
-    private Boolean isCorrect;
+    private Boolean isCorrect; 
 
-    public Pick() {
-    }
+    // Constructors
+    public Pick() {}
 
-    public Pick(PickEntry pickEntry, Matchup matchup, String selectedTeam) {
-        this.pickEntry = pickEntry;
+    public Pick(User user, Matchup matchup, String selectedTeam) {
+        this.user = user;
         this.matchup = matchup;
         this.selectedTeam = selectedTeam;
     }
@@ -48,12 +41,12 @@ public class Pick {
         this.id = id;
     }
 
-    public PickEntry getPickEntry() {
-        return pickEntry;
+    public User getUser() {
+        return user;
     }
 
-    public void setPickEntry(PickEntry pickEntry) {
-        this.pickEntry = pickEntry;
+    public void setUser(User user) {
+        this.user = user;
     }
 
     public Matchup getMatchup() {

@@ -2,11 +2,15 @@ package family.fantasy.api.core;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import family.fantasy.api.core.NflStateService.NflState;
 import family.fantasy.api.locks.Matchup;
 import family.fantasy.api.locks.MatchupRepository;
 import family.fantasy.api.locks.Pick;
 import family.fantasy.api.locks.PickRepository;
 
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -20,11 +24,13 @@ public class NflSyncService {
     private final RestTemplate restTemplate;
     private final MatchupRepository matchupRepository;
     private final PickRepository pickRepository;
+    private final NflStateService nflStateService;
 
-    public NflSyncService(RestTemplate restTemplate, MatchupRepository matchupRepository, PickRepository pickRepository) {
+    public NflSyncService(RestTemplate restTemplate, MatchupRepository matchupRepository, PickRepository pickRepository, NflStateService nflStateService) {
         this.restTemplate = restTemplate;
         this.matchupRepository = matchupRepository;
         this.pickRepository = pickRepository;
+        this.nflStateService = nflStateService;
     }
 
     @Scheduled(cron = "0 0/15 13-23 * * SUN")
@@ -35,25 +41,29 @@ public class NflSyncService {
     }
 
     @Scheduled(cron = "0 0 6 * * TUE")
+    @Caching(evict = {
+        @CacheEvict(value = "nflState", allEntries = true),
+        @CacheEvict(value = "groupLeaderboards", allEntries = true),
+        @CacheEvict(value = "groupDetails", allEntries = true),
+    })
     public void tuesdayMorningWrapUp() {
         System.out.println("🧹 [TUESDAY WRAP-UP] Doing final check on week scores...");
         syncCurrentWeek();
     }
 
+    
     private void syncCurrentWeek() {
         try {
-            String sleeperUrl = "https://api.sleeper.app/v1/state/nfl";
-            JsonNode state = restTemplate.getForObject(sleeperUrl, JsonNode.class);
-
-            if (state != null) {
-                int currentWeek = state.path("week").asInt();
-                String year = state.path("season").asText();
-                int espnSeasonType = state.path("season_type").asText().equals("post") ? 3 : 2;
-                
-                fetchAndSaveFromEspn(year, espnSeasonType, currentWeek);
-            }
+            NflState state = nflStateService.getNflState();
+            
+            // Translate Sleeper's "post" string to ESPN's integer (3 for playoffs, 2 for regular)
+            int espnSeasonType = state.seasonType().equals("post") ? 3 : 2;
+            
+            // Pass the cached data into your existing ESPN fetcher
+            fetchAndSaveFromEspn(String.valueOf(state.season()), espnSeasonType, state.week());
+            
         } catch (Exception e) {
-            System.err.println("❌ Failed to get current NFL state: " + e.getMessage());
+            System.err.println("❌ Failed to sync current NFL week: " + e.getMessage());
         }
     }
 

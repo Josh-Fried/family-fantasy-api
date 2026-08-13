@@ -7,36 +7,22 @@ import family.fantasy.api.core.NflSyncService;
 
 /**
  * REST controller for administrative commissioner actions.
- * Allows for manual score overrides and correcting team picks 
- * if a league member makes an error or a rule dispute occurs.
  */
 @RestController
 @RequestMapping("/api/v1/admin")
 public class AdminController {
 
-    private final PickEntryRepository pickEntryRepository;
     private final PickRepository pickRepository;
     private final NflSyncService nflSyncService;
 
-    public AdminController(PickEntryRepository pickEntryRepository, PickRepository pickRepository, NflSyncService nflSyncService) {
-        this.pickEntryRepository = pickEntryRepository;
+    // Removed PickEntryRepository from the constructor!
+    public AdminController(PickRepository pickRepository, NflSyncService nflSyncService) {
         this.pickRepository = pickRepository;
         this.nflSyncService = nflSyncService;
     }
 
-    @PutMapping("/entries/{entryId}/override-score")
-    public ResponseEntity<PickEntry> overrideTotalScore(
-            @PathVariable Long entryId,
-            @RequestParam Integer newScore) {
-        
-        PickEntry entry = pickEntryRepository.findById(entryId)
-                .orElseThrow(() -> new RuntimeException("Pick Entry not found"));
-                
-        entry.setTotalScore(newScore);
-        PickEntry updatedEntry = pickEntryRepository.save(entry);
-        
-        return ResponseEntity.ok(updatedEntry);
-    }
+    // NOTE: overrideTotalScore was removed because PickEntry no longer exists. 
+    // Total scores will now be calculated dynamically for the User based on their Picks!
 
     @PutMapping("/picks/{pickId}/override-team")
     public ResponseEntity<Pick> overridePickSelection(
@@ -66,6 +52,7 @@ public class AdminController {
         
         return ResponseEntity.ok("Successfully triggered sync for Week " + week + ". Check your Java console!");
     }
+    
     /**
      * Download the entire season schedule at once!
      * To run this, open your web browser and go to:
@@ -79,4 +66,3 @@ public class AdminController {
         return ResponseEntity.ok("Successfully downloaded all 18 weeks of the " + year + " schedule! Check console.");
     }
 }
-
