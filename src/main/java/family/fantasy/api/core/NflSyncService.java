@@ -34,7 +34,7 @@ public class NflSyncService {
     }
 
     @Scheduled(cron = "0 0/15 13-23 * * SUN")
-    @Scheduled(cron = "0 0/15 18-23 * * MON,THU")
+    @Scheduled(cron = "0 0/15 17-23 * * MON,THU")
     public void liveScoreUpdates() {
         System.out.println("🏈 [LIVE SYNC] Waking up to update live game scores and check winners...");
         syncCurrentWeek();
@@ -51,13 +51,17 @@ public class NflSyncService {
         syncCurrentWeek();
     }
 
-    
     private void syncCurrentWeek() {
         try {
             NflState state = nflStateService.getNflState();
             
-            // Translate Sleeper's "post" string to ESPN's integer (3 for playoffs, 2 for regular)
-            int espnSeasonType = state.seasonType().equals("post") ? 3 : 2;
+            // Translate Sleeper's seasonType string into ESPN's integer (1 = pre, 2 = regular, 3 = post)
+            int espnSeasonType = 2; // Default to regular season
+            if ("pre".equalsIgnoreCase(state.seasonType())) {
+                espnSeasonType = 1;
+            } else if ("post".equalsIgnoreCase(state.seasonType())) {
+                espnSeasonType = 3;
+            }
             
             // Pass the cached data into your existing ESPN fetcher
             fetchAndSaveFromEspn(String.valueOf(state.season()), espnSeasonType, state.week());
@@ -68,19 +72,47 @@ public class NflSyncService {
     }
 
     public void syncEntireSeason(String year) {
-        System.out.println("🚀 Commencing full season download for " + year + "...");
-        int totalGamesSaved = 0;
-        
-        for (int week = 1; week <= 18; week++) {
-            totalGamesSaved += fetchAndSaveFromEspn(year, 2, week); 
-            try { Thread.sleep(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        // Automatically default to Regular Season (2)
+        syncEntireSeason(year, 2);
+    }
+
+    public void syncEntireSeason(String year, Integer seasonType) {
+        int type = (seasonType != null) ? seasonType : 2;
+        String seasonTypeString;
+        int maxWeeks;
+
+        if (type == 1) {
+            seasonTypeString = "preseason";
+            maxWeeks = 4;
+        } else if (type == 3) {
+            seasonTypeString = "postseason";
+            maxWeeks = 5;
+        } else {
+            seasonTypeString = "regular season";
+            maxWeeks = 18;
         }
         
-        System.out.println("✅ Finished! Total " + year + " games saved/updated in database: " + totalGamesSaved);
+        System.out.println("🚀 Commencing full " + seasonTypeString + " download for " + year + "...");
+        int totalGamesSaved = 0;
+        
+        for (int week = 1; week <= maxWeeks; week++) {
+            totalGamesSaved += fetchAndSaveFromEspn(year, type, week); 
+            try { 
+                Thread.sleep(1000); 
+            } catch (InterruptedException e) { 
+                Thread.currentThread().interrupt(); 
+            }
+        }
+        
+        System.out.println("✅ Finished! Total " + year + " " + seasonTypeString + " games saved/updated in database: " + totalGamesSaved);
     }
 
     public int fetchAndSaveFromEspn(String year, int seasonType, int week) {
         int gamesSavedThisWeek = 0;
+        int actualDatabaseWeek = week;
+        if (seasonType == 3) { // Playoffs
+            actualDatabaseWeek = week + 18; // Week 1 = Week 19
+        }
         
         try {
             String url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?year=" + year + "&seasontype=" + seasonType + "&week=" + week;
@@ -134,25 +166,17 @@ public class NflSyncService {
                         }
                     }
 
-                    // System.out.println("🏈 Parsed Game Data:" +
-                    //     "\n   ID (externalId): " + gameId +
-                    //     "\n   Status: " + status +
-                    //     "\n   Kickoff Time: " + kickoffTime +
-                    //     "\n   Away Team: " + awayTeam + " (" + awayScore + ")" +
-                    //     "\n   Home Team: " + homeTeam + " (" + homeScore + ")" +
-                    //     "\n   Winning Team: " + winningTeam +
-                    //     "\n------------------------------------------------");
-
-                    // Save/Update in Database
                     Matchup existingMatchup = matchupRepository.findByExternalId(gameId).orElse(null);
                     
                     if (existingMatchup == null) {
+                        
+
                         Matchup newMatchup = new Matchup();
                         newMatchup.setExternalId(gameId);
                         newMatchup.setSeason(Integer.parseInt(year)); 
                         newMatchup.setHomeTeam(homeTeam);
                         newMatchup.setAwayTeam(awayTeam);
-                        newMatchup.setWeekNumber(week);
+                        newMatchup.setWeekNumber(actualDatabaseWeek);
                         newMatchup.setStatus(status);
                         newMatchup.setHomeScore(homeScore);
                         newMatchup.setAwayScore(awayScore);
@@ -172,7 +196,6 @@ public class NflSyncService {
                         matchupRepository.save(existingMatchup);
                         gamesSavedThisWeek++;
 
-                        // TRIGGER GRADING: If game just flipped to FINAL right now, grade picks!
                         if (!wasAlreadyFinal && "STATUS_FINAL".equals(status)) {
                             System.out.println("🏁 Game went final: " + awayTeam + " (" + awayScore + ") @ " + homeTeam + " (" + homeScore + ")");
                             gradeMatchup(existingMatchup);
@@ -184,7 +207,7 @@ public class NflSyncService {
             }
         } catch (Exception e) {
             System.err.println("❌ FAILED to sync ESPN schedule for Week " + week + ": " + e.getMessage());
-            e.printStackTrace(); // THIS WILL SHOW US EXACTLY WHY IT FAILED
+            e.printStackTrace();
         }
         
         return gamesSavedThisWeek;

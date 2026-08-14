@@ -24,45 +24,57 @@ public class PickService {
     }
 
     // Helper method to find exactly Sunday at 11:00 AM MST for the given week
-    private OffsetDateTime getSunday11AmMst(int season, int weekNumber) {
-        List<Matchup> weeklyMatchups = matchupRepository.findBySeasonAndWeekNumber(season, weekNumber);
+    private OffsetDateTime getSunday11AmMst(Matchup matchup) {
+        // 1. Convert kickoff to Mountain Time safely (handles Daylight Saving automatically)
+        java.time.ZonedDateTime mountainKickoff = matchup.getKickoffTime()
+                .atZoneSameInstant(java.time.ZoneId.of("America/Denver"));
+        
+        java.time.ZonedDateTime targetSunday;
 
-        // Find a Sunday game to get the correct date
-        Optional<Matchup> sundayGame = weeklyMatchups.stream()
-                .filter(m -> m.getKickoffTime().atZoneSameInstant(ZoneId.of("America/Denver")).getDayOfWeek() == DayOfWeek.SUNDAY)
-                .findFirst();
-
-        if (sundayGame.isPresent()) {
-            // Extract the date of that Sunday, and force the time to 11:00 AM MST
-            return sundayGame.get().getKickoffTime()
-                    .atZoneSameInstant(ZoneId.of("America/Denver"))
-                    .toLocalDate() // Gets just the YYYY-MM-DD
-                    .atTime(11, 0) // Sets time to 11:00 AM
-                    .atZone(ZoneId.of("America/Denver"))
-                    .toOffsetDateTime();
-        } else {
-            // Fallback: If there are literally no Sunday games this week, fallback to the very first game
-            return weeklyMatchups.stream()
-                    .min(Comparator.comparing(Matchup::getKickoffTime))
-                    .map(Matchup::getKickoffTime)
-                    .orElse(OffsetDateTime.MAX);
+        // 2. NFL weeks run Thursday -> Monday. 
+        // If the game is played Tues-Sat, the main Sunday is the NEXT Sunday.
+        // If the game is played on Sunday or Monday, the main Sunday is the PREVIOUS or SAME Sunday.
+        switch (mountainKickoff.getDayOfWeek()) {
+            case TUESDAY:
+            case WEDNESDAY:
+            case THURSDAY:
+            case FRIDAY:
+            case SATURDAY:
+                targetSunday = mountainKickoff.with(java.time.temporal.TemporalAdjusters.next(java.time.DayOfWeek.SUNDAY));
+                break;
+            default: // SUNDAY or MONDAY
+                targetSunday = mountainKickoff.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.SUNDAY));
+                break;
         }
+
+        // 3. Set the time to exactly 11:00 AM Mountain Time and convert back to OffsetDateTime
+        return targetSunday
+                .withHour(11)
+                .withMinute(0)
+                .withSecond(0)
+                .withNano(0)
+                .toOffsetDateTime();
     }
 
     // Validates if a pick can be made or removed
     private void validatePickTiming(Matchup matchup) {
+        System.out.println("Validating Pick Timing");
         OffsetDateTime now = OffsetDateTime.now(ZoneId.of("America/Denver"));
         
         // Rule 1: Always lock at the game's exact kickoff time (handles Thurs/Fri, and early London games)
         if (now.isAfter(matchup.getKickoffTime()) || now.isEqual(matchup.getKickoffTime())) {
+            System.out.println("1");
             throw new RuntimeException("Too late to change. The game has already kicked off.");
         }
 
-        // Rule 2: Lock everything else at Sunday 11:00 AM MST
-        OffsetDateTime sunday11AM = getSunday11AmMst(matchup.getSeason(), matchup.getWeekNumber());
+        // Rule 2: Lock everything else at Sunday 11:00 AM Mountain Time
+        OffsetDateTime sunday11AM = getSunday11AmMst(matchup);
         if (now.isAfter(sunday11AM) || now.isEqual(sunday11AM)) {
-            throw new RuntimeException("Picks are locked for the week. The Sunday 11:00 AM MST deadline has passed.");
+            System.out.println("2");
+            throw new RuntimeException("Picks are locked for the week. The Sunday 11:00 AM deadline has passed.");
         }
+
+        System.out.println("PICK SAVED");
     }
 
     public Pick submitPick(User user, Long matchupId, String selectedTeam) {
@@ -103,15 +115,26 @@ public class PickService {
             return pickRepository.findByUserIdAndMatchupSeasonAndMatchupWeekNumber(targetUserId, season, week);
         }
 
-        // 2. Fetch exactly Sunday at 11:00 AM MST
-        OffsetDateTime revealTime = getSunday11AmMst(season, week);
-
-        // 3. Block the request if the current time is before Sunday at 11 AM
-        if (OffsetDateTime.now(ZoneId.of("America/Denver")).isBefore(revealTime)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Other players' picks are locked until Sunday at 11:00 AM MST.");
+        // 2. Fetch the matchups for this specific week
+        List<Matchup> weekMatchups = matchupRepository.findBySeasonAndWeekNumber(season, week);
+        
+        // If there are no games, there are no picks to reveal
+        if (weekMatchups == null || weekMatchups.isEmpty()) {
+            return java.util.Collections.emptyList();
         }
 
-        // 4. If time has passed, return the picks safely
+        // 3. Pass ANY game from this week into our robust calculator to get the Sunday deadline
+        OffsetDateTime revealTime = getSunday11AmMst(weekMatchups.get(0));
+
+        // 4. Block the request if the current time is before Sunday at 11 AM
+        if (OffsetDateTime.now(java.time.ZoneId.of("America/Denver")).isBefore(revealTime)) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.FORBIDDEN, 
+                "Other players' picks are locked until Sunday at 11:00 AM MST."
+            );
+        }
+
+        // 5. If time has passed, return the picks safely
         return pickRepository.findByUserIdAndMatchupSeasonAndMatchupWeekNumber(targetUserId, season, week);
     }
 }
