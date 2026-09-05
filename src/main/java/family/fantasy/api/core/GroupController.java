@@ -85,27 +85,6 @@ public class GroupController {
         return ResponseEntity.ok(leaderboard);
     }
 
-    @DeleteMapping("/{groupId}/members/{memberId}")
-    public ResponseEntity<Void> removeMember(
-            @PathVariable Long groupId,
-            @PathVariable Long memberId,
-            @RequestParam String tokenUsername) {
-            
-        User requester = authService.getAuthenticatedUser(tokenUsername);
-        groupService.removeMember(groupId, memberId, requester.getId());
-        return ResponseEntity.noContent().build();
-    }
-
-    @DeleteMapping("/{groupId}")
-    public ResponseEntity<Void> deleteGroup(
-            @PathVariable Long groupId,
-            @RequestParam String tokenUsername) {
-            
-        User requester = authService.getAuthenticatedUser(tokenUsername);
-        groupService.deleteGroup(groupId, requester.getId());
-        return ResponseEntity.noContent().build();
-    }
-
     /**
      * Endpoint for a user to leave a group.
      */
@@ -116,20 +95,6 @@ public class GroupController {
             
         User user = authService.getAuthenticatedUser(tokenUsername);
         groupService.leaveGroup(groupId, user.getId());
-        return ResponseEntity.noContent().build();
-    }
-
-    /**
-     * Endpoint for an admin to promote another member to admin status.
-     */
-    @PutMapping("/{groupId}/members/{memberId}/promote")
-    public ResponseEntity<Void> promoteMember(
-            @PathVariable Long groupId,
-            @PathVariable Long memberId,
-            @RequestParam String tokenUsername) {
-            
-        User requester = authService.getAuthenticatedUser(tokenUsername);
-        groupService.promoteToAdmin(groupId, memberId, requester.getId());
         return ResponseEntity.noContent().build();
     }
 

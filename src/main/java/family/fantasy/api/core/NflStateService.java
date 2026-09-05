@@ -2,6 +2,8 @@ package family.fantasy.api.core;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -19,11 +21,20 @@ public class NflStateService {
      * Fetches current state from Sleeper and caches the composite object.
      * Evicted on Tuesdays via NflSyncService.
      */
+    @Value("${fantasy.testing.preseason-override:false}")
+    private boolean preseasonOverride;
+
+    @Value("${fantasy.testing.override-week:1}")
+    private int overrideWeek;
+
     @Cacheable("nflState")
     public NflState getNflState() {
+        if (preseasonOverride) {
+            return new NflState(2026, overrideWeek, "pre");
+        }
+        
         try {
             String sleeperUrl = "https://api.sleeper.app/v1/state/nfl";
-            // Map directly to our DTO, avoiding JsonNode type definition errors
             SleeperStateResponse response = restTemplate.getForObject(sleeperUrl, SleeperStateResponse.class);
 
             if (response != null) {

@@ -14,6 +14,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Custom filter that intercepts every HTTP request to check for a valid JWT token.
@@ -53,15 +54,20 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
             if (user != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 // 5. Create the Spring Security authentication object
+                // Assign authorities based on user flag
+                List<org.springframework.security.core.GrantedAuthority> authorities = new ArrayList<>();
+                if (user.isGlobalAdmin()) {
+                    authorities.add(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_GLOBAL_ADMIN"));
+                }
+
+                // Create the authentication token WITH the newly assigned authorities
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                         user,
                         null,
-                        new ArrayList<>() 
+                        authorities 
                 );
 
-                // Add request details to the authentication token
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-
                 // 6. Inject the authenticated user into the Spring Security Context
                 SecurityContextHolder.getContext().setAuthentication(authToken);
             }

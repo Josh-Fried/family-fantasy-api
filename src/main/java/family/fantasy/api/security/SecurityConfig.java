@@ -75,18 +75,23 @@ public class SecurityConfig {
     //     return http.build();
     // }
 
+    // Updated bean inside SecurityConfig.java
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                .csrf(AbstractHttpConfigurer::disable)
-                .cors(withDefaults())
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/auth/**").permitAll()
-                        // Change this from authenticated() to permitAll() to stop the 403 errors
-                        .anyRequest().permitAll())
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
-                // Completely remove the .addFilterBefore(...) line so it stops looking for a token
-                
+            .csrf(AbstractHttpConfigurer::disable)
+            .cors(withDefaults())
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/v1/auth/**").permitAll()
+                // Lock down all admin routes to only users with the global admin authority
+                .requestMatchers("/api/v1/admin/**").hasAuthority("ROLE_GLOBAL_ADMIN")
+                // Require standard authentication for everything else
+                .anyRequest().authenticated()
+            )
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            // Re-enable the JWT filter so tokens are actually checked
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+            
         return http.build();
     }
 

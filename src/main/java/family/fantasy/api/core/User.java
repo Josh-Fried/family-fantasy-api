@@ -1,5 +1,7 @@
 package family.fantasy.api.core;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -20,6 +22,9 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "is_global_admin")
+    private boolean isGlobalAdmin = false;  
+
     @Column(nullable = false, unique = true)
     private String username;
 
@@ -30,6 +35,7 @@ public class User {
     private Integer globalScore = 0;
 
     @Column
+    @JsonIgnore
     private String password;
 
     public User() {
@@ -46,6 +52,14 @@ public class User {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public boolean isGlobalAdmin() {
+        return isGlobalAdmin;
+    }   
+
+    public void setGlobalAdmin(boolean globalAdmin) {
+        isGlobalAdmin = globalAdmin;
     }
 
     public String getUsername() {

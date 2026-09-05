@@ -2,22 +2,30 @@ package family.fantasy.api.core;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
 import family.fantasy.api.core.NflStateService.NflState;
 import family.fantasy.api.locks.Matchup;
 import family.fantasy.api.locks.MatchupRepository;
 import family.fantasy.api.locks.Pick;
 import family.fantasy.api.locks.PickRepository;
+import family.fantasy.api.locks.UserWeeklyScore;
+import family.fantasy.api.locks.UserWeeklyScoreRepository;
 
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.Caching;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.OffsetDateTime;
 import java.util.List;
 
+/**
+ * Service responsible for orchestrating NFL schedule synchronization, 
+ * fetching live game outcomes from ESPN, updating matchup statuses, 
+ * and evaluating user picks to compute aggregated weekly scores.
+ */
 @Service
 public class NflSyncService {
 
@@ -25,14 +33,27 @@ public class NflSyncService {
     private final MatchupRepository matchupRepository;
     private final PickRepository pickRepository;
     private final NflStateService nflStateService;
+    private final UserWeeklyScoreRepository userWeeklyScoreRepository;
+    private final UserRepository userRepository; 
 
-    public NflSyncService(RestTemplate restTemplate, MatchupRepository matchupRepository, PickRepository pickRepository, NflStateService nflStateService) {
+    public NflSyncService(RestTemplate restTemplate, 
+                          MatchupRepository matchupRepository, 
+                          PickRepository pickRepository, 
+                          NflStateService nflStateService, 
+                          UserWeeklyScoreRepository userWeeklyScoreRepository,
+                          UserRepository userRepository) {
         this.restTemplate = restTemplate;
         this.matchupRepository = matchupRepository;
         this.pickRepository = pickRepository;
         this.nflStateService = nflStateService;
+        this.userWeeklyScoreRepository = userWeeklyScoreRepository;
+        this.userRepository = userRepository;
     }
 
+    /**
+     * Scheduled job that frequently triggers live scoring updates from ESPN on game days.
+     * It runs every 15 minutes during standard NFL windows on Sunday, Monday, and Thursday.
+     */
     @Scheduled(cron = "0 0/15 13-23 * * SUN")
     @Scheduled(cron = "0 0/15 17-23 * * MON,THU")
     public void liveScoreUpdates() {
@@ -40,22 +61,32 @@ public class NflSyncService {
         syncCurrentWeek();
     }
 
+    /**
+     * Scheduled job running early Tuesday morning to perform a final sweep of the week's games.
+     * It clears all relevant leaderboards and state caches to ensure fresh rendering 
+     * once stat corrections and finalized outcomes are logged.
+     */
     @Scheduled(cron = "0 0 6 * * TUE")
     @Caching(evict = {
         @CacheEvict(value = "nflState", allEntries = true),
         @CacheEvict(value = "groupLeaderboards", allEntries = true),
         @CacheEvict(value = "groupDetails", allEntries = true),
+        @CacheEvict(value = "userTotalScores", allEntries = true)
     })
     public void tuesdayMorningWrapUp() {
         System.out.println("🧹 [TUESDAY WRAP-UP] Doing final check on week scores...");
         syncCurrentWeek();
     }
 
+    /**
+     * Fetches the active NFL state to determine the current week and season context,
+     * translates the season configuration to match ESPN's API parameters, and 
+     * delegates the network call to retrieve the latest live data.
+     */
     private void syncCurrentWeek() {
         try {
             NflState state = nflStateService.getNflState();
             
-            // Translate Sleeper's seasonType string into ESPN's integer (1 = pre, 2 = regular, 3 = post)
             int espnSeasonType = 2; // Default to regular season
             if ("pre".equalsIgnoreCase(state.seasonType())) {
                 espnSeasonType = 1;
@@ -63,7 +94,6 @@ public class NflSyncService {
                 espnSeasonType = 3;
             }
             
-            // Pass the cached data into your existing ESPN fetcher
             fetchAndSaveFromEspn(String.valueOf(state.season()), espnSeasonType, state.week());
             
         } catch (Exception e) {
@@ -71,11 +101,10 @@ public class NflSyncService {
         }
     }
 
-    public void syncEntireSeason(String year) {
-        // Automatically default to Regular Season (2)
-        syncEntireSeason(year, 2);
-    }
-
+    /**
+     * Batch utility primarily used by administrators to populate or repair an entire season 
+     * of matchups by iterating through all possible weeks sequentially and fetching ESPN records.
+     */
     public void syncEntireSeason(String year, Integer seasonType) {
         int type = (seasonType != null) ? seasonType : 2;
         String seasonTypeString;
@@ -107,11 +136,16 @@ public class NflSyncService {
         System.out.println("✅ Finished! Total " + year + " " + seasonTypeString + " games saved/updated in database: " + totalGamesSaved);
     }
 
+    /**
+     * Reaches out to the external ESPN scoreboard API to capture schedules, scores, 
+     * team designations, and final game states. Translates incoming JSON into local Matchup 
+     * entities, persisting new games and updating ongoing or finalized matches.
+     */
     public int fetchAndSaveFromEspn(String year, int seasonType, int week) {
         int gamesSavedThisWeek = 0;
         int actualDatabaseWeek = week;
-        if (seasonType == 3) { // Playoffs
-            actualDatabaseWeek = week + 18; // Week 1 = Week 19
+        if (seasonType == 3) { 
+            actualDatabaseWeek = week + 18;
         }
         
         try {
@@ -128,7 +162,6 @@ public class NflSyncService {
                     String gameId = event.path("id").asText("UNKNOWN_ID");
                     String status = event.path("status").path("type").path("name").asText("STATUS_UNKNOWN");
                     
-                    // 🕒 Grab kickoff date/time string from ESPN (e.g. "2026-09-10T00:20Z")
                     String dateString = event.path("date").asText(null);
                     OffsetDateTime kickoffTime = dateString != null ? OffsetDateTime.parse(dateString) : null;
 
@@ -154,7 +187,6 @@ public class NflSyncService {
                         }
                     }
 
-                    // Determine winning team if game is final
                     String winningTeam = null;
                     if ("STATUS_FINAL".equals(status)) {
                         if (homeScore > awayScore) {
@@ -169,8 +201,6 @@ public class NflSyncService {
                     Matchup existingMatchup = matchupRepository.findByExternalId(gameId).orElse(null);
                     
                     if (existingMatchup == null) {
-                        
-
                         Matchup newMatchup = new Matchup();
                         newMatchup.setExternalId(gameId);
                         newMatchup.setSeason(Integer.parseInt(year)); 
@@ -214,7 +244,8 @@ public class NflSyncService {
     }
 
     /**
-     * Grades all user picks tied to a specific matchup once that matchup goes final.
+     * Iterates over all database records tied to a finalized matchup and flags individual user
+     * picks as true or false based strictly on whether their selected team exactly matches the outcome.
      */
     private void gradeMatchup(Matchup matchup) {
         List<Pick> picks = pickRepository.findByMatchupId(matchup.getId());
@@ -229,5 +260,68 @@ public class NflSyncService {
         }
         
         System.out.println("✅ Graded " + picks.size() + " user picks for game: " + matchup.getAwayTeam() + " @ " + matchup.getHomeTeam());
+    }
+
+    /**
+     * Executes the strict all-or-nothing scoring rule across the user base for a particular week.
+     * Evaluates if a user picked every single completed game correctly, computes their point 
+     * accumulation, stores the summarized total in the database, and evicts stale leaderboard caches.
+     */
+    @Transactional
+    @CacheEvict(value = {"userTotalScores", "groupLeaderboards"}, allEntries = true)
+    public void processWeeklyScoring(int season, int week) {
+        List<User> users = userRepository.findAll();
+
+        for (User user : users) {
+            List<Pick> weekPicks = pickRepository.findByUserIdAndMatchupSeasonAndMatchupWeekNumber(user.getId(), season, week);
+
+            if (weekPicks.isEmpty()) {
+                continue;
+            }
+
+            int correctCount = 0;
+            boolean hasIncorrectPick = false;
+
+            for (Pick pick : weekPicks) {
+                Matchup matchup = pick.getMatchup();
+                if (matchup == null || !"STATUS_FINAL".equals(matchup.getStatus())) {
+                    continue;
+                }
+
+                String selected = pick.getSelectedTeam();
+                String winner = matchup.getWinningTeam();
+
+                if (selected != null && winner != null && selected.equalsIgnoreCase(winner)) {
+                    correctCount++;
+                } else {
+                    hasIncorrectPick = true;
+                }
+            }
+
+            int pointsEarned = hasIncorrectPick ? 0 : correctCount;
+
+            UserWeeklyScore weeklyScore = userWeeklyScoreRepository
+                .findByUserIdAndSeasonAndWeekNumber(user.getId(), season, week)
+                .orElseGet(() -> {
+                    UserWeeklyScore newScore = new UserWeeklyScore();
+                    newScore.setUser(user);
+                    newScore.setSeason(season);
+                    newScore.setWeekNumber(week);
+                    return newScore;
+                });
+
+            weeklyScore.setPointsEarned(pointsEarned);
+            weeklyScore.setPerfectWeek(!hasIncorrectPick && correctCount > 0);
+            userWeeklyScoreRepository.save(weeklyScore);
+        }
+    }
+
+    /**
+     * Retrieves the fully aggregated points total for a distinct user utilizing a highly efficient 
+     * sum query against weekly summaries, serving subsequent reads directly from memory via caching.
+     */
+    @Cacheable(value = "userTotalScores", key = "#userId + '-' + #season")
+    public int getUserTotalScore(Long userId, int season) {
+        return userWeeklyScoreRepository.findTotalScoreByUserIdAndSeason(userId, season);
     }
 }

@@ -8,11 +8,13 @@ import org.springframework.stereotype.Repository;
 import family.fantasy.api.core.Group.GameType;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface UserGroupRepository extends JpaRepository<UserGroup, Long> {
     List<UserGroup> findByUserId(Long userId);
     List<UserGroup> findByGroupId(Long groupId);
+    Optional<UserGroup> findByGroupIdAndUserId(Long groupId, Long userId);
     @Query("SELECT COUNT(ug) FROM UserGroup ug WHERE ug.user.id = :userId AND ug.group.gameType = :gameType AND ug.isAdmin = true")
     long countActiveGroupsForUser(@Param("userId") Long userId, @Param("gameType") GameType gameType);
 }

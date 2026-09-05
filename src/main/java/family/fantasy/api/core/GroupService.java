@@ -2,12 +2,15 @@ package family.fantasy.api.core;
 
 import family.fantasy.api.locks.Pick;
 import family.fantasy.api.locks.PickRepository;
+import family.fantasy.api.locks.UserWeeklyScore;
+import family.fantasy.api.locks.UserWeeklyScoreRepository;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -22,13 +25,17 @@ public class GroupService {
     private final UserGroupRepository userGroupRepository;
     private final PickRepository pickRepository;
     private final NflStateService nflStateService;
+    private final NflSyncService nflSyncService;
+    private final UserWeeklyScoreRepository userWeeklyScoreRepository;
 
     // Injects required repositories for managing groups, memberships, and user picks
-    public GroupService(GroupRepository groupRepository, UserGroupRepository userGroupRepository, PickRepository pickRepository, NflStateService nflStateService) {
+    public GroupService(GroupRepository groupRepository, UserGroupRepository userGroupRepository, PickRepository pickRepository, NflStateService nflStateService, NflSyncService nflSyncService, UserWeeklyScoreRepository userWeeklyScoreRepository) {
         this.groupRepository = groupRepository;
         this.userGroupRepository = userGroupRepository;
         this.pickRepository = pickRepository;
         this.nflStateService = nflStateService;
+        this.nflSyncService = nflSyncService;
+        this.userWeeklyScoreRepository = userWeeklyScoreRepository;
     }
 
     /**
@@ -91,31 +98,30 @@ public class GroupService {
     }
 
     /**
-     * Calculates and returns the full leaderboard for a group.
-     * Computes total correct picks (score) and weekly streak for every member, then sorts descending by score.
-     * Cached under 'groupLeaderboards' using the groupId as the key.
+     * Calculates and returns the full leaderboard for a group using summarized weekly points.
+     * Cached under 'groupLeaderboards' using the groupId as the key. 
+     * Cache is automatically evicted by NflSyncService on Tuesday mornings.
      */
     @Cacheable(value = "groupLeaderboards", key = "#groupId")
     public List<GroupController.LeaderboardDTO> getLeaderboard(Long groupId) {
         List<UserGroup> members = userGroupRepository.findByGroupId(groupId);
 
+        // Fetch current season dynamically to pass into the scoring query
+        int currentSeason = nflStateService.getNflState().season();
+
         return members.stream().map(member -> {
             User user = member.getUser();
-            List<Pick> userPicks = pickRepository.findByUserId(user.getId());
+            
+            // Replaces the heavy inline O(N) pick counting with our O(W) cached sum query
+            int totalPoints = nflSyncService.getUserTotalScore(user.getId(), currentSeason);
 
-            long correctPicks = userPicks.stream()
-                .filter(pick -> pick.getMatchup() != null && 
-                                "STATUS_FINAL".equals(pick.getMatchup().getStatus()) && 
-                                pick.getSelectedTeam() != null && 
-                                pick.getSelectedTeam().equalsIgnoreCase(pick.getMatchup().getWinningTeam()))
-                .count();
-
-            int streak = calculateWeeklyStreak(userPicks);
+            // Updated streak calculation from user_weekly_scores
+            int streak = calculateWeeklyStreak(user.getId(), currentSeason);
 
             return new GroupController.LeaderboardDTO(
                 user.getId(),
                 user.getDisplayName(),
-                (int) correctPicks,
+                totalPoints,
                 streak,
                 member.getIsAdmin()
             );
@@ -267,48 +273,39 @@ public class GroupService {
     }
 
     /**
-     * Calculates a user's active weekly streak (e.g., +3 for winning 3 consecutive weeks, -2 for losing 2).
-     * Groups finalized picks by week, sorts weeks descending, and checks if the user had at least 1 correct pick that week.
+     * Calculates a user's active weekly streak using the user_weekly_scores table.
+     * +N for N consecutive perfect weeks, -N for N consecutive imperfect weeks.
+     * Evaluates weeks in descending order (most recent completed week first).
      */
-    public int calculateWeeklyStreak(List<Pick> userPicks) {
-        if (userPicks == null || userPicks.isEmpty()) return 0;
+    public int calculateWeeklyStreak(Long userId, int season) {
+        List<UserWeeklyScore> weeklyScores = userWeeklyScoreRepository
+            .findByUserIdAndSeasonOrderByWeekNumberDesc(userId, season);
 
-        // Group finished picks by week number
-        Map<Integer, List<Pick>> picksByWeek = userPicks.stream()
-            .filter(p -> p.getMatchup() != null && "STATUS_FINAL".equals(p.getMatchup().getStatus()))
-            .collect(Collectors.groupingBy(p -> p.getMatchup().getWeekNumber()));
-
-        if (picksByWeek.isEmpty()) return 0;
-
-        // Sort weeks descending (most recent week first)
-        List<Integer> sortedWeeks = picksByWeek.keySet().stream()
-            .sorted(Comparator.reverseOrder())
-            .collect(Collectors.toList());
+        if (weeklyScores == null || weeklyScores.isEmpty()) {
+            return 0;
+        }
 
         int streak = 0;
-        Boolean streakType = null; // true = win streak, false = loss streak
+        Boolean streakIsWin = null; // true = winning/perfect streak, false = losing/imperfect streak
 
-        for (Integer week : sortedWeeks) {
-            List<Pick> weekPicks = picksByWeek.get(week);
+        for (UserWeeklyScore score : weeklyScores) {
+            // A week is a win ONLY if it was a perfect week
+            boolean isWeekWin = score.isPerfectWeek();
 
-            long correctCount = weekPicks.stream()
-                .filter(p -> p.getSelectedTeam() != null && 
-                             p.getSelectedTeam().equalsIgnoreCase(p.getMatchup().getWinningTeam()))
-                .count();
-
-            boolean isWeekWin = correctCount > 0;
-
-            if (streakType == null) {
-                streakType = isWeekWin;
+            if (streakIsWin == null) {
+                // Establish the current active streak type from the most recent completed week
+                streakIsWin = isWeekWin;
                 streak = 1;
-            } else if (isWeekWin == streakType) {
+            } else if (isWeekWin == streakIsWin) {
+                // Continuation of current streak
                 streak++;
             } else {
-                break; // Streak is broken
+                // Streak is broken
+                break;
             }
         }
 
-        return (streakType != null && streakType) ? streak : -streak;
+        return (streakIsWin != null && streakIsWin) ? streak : -streak;
     }
 
     @CacheEvict(cacheNames = {"groupDetails", "groupLeaderboards"}, allEntries = true)
@@ -411,5 +408,75 @@ public class GroupService {
             
         target.setIsAdmin(true);
         userGroupRepository.save(target);
+    }
+
+    /**
+     * Checks if a specified user is an administrator of a given group using the UserGroup bridge table.
+     *
+     * @param groupId the unique identifier of the group
+     * @param userId  the unique identifier of the user to check
+     * @return true if the user holds admin privileges in the group, false otherwise
+     */
+    public boolean isAdmin(Long groupId, Long userId) {
+        return userGroupRepository.findByGroupIdAndUserId(groupId, userId)
+                .map(UserGroup::getIsAdmin)
+                .orElse(false);
+    }
+
+    /**
+     * Updates the display name of a specific group.
+     *
+     * @param groupId     the unique identifier of the group to update
+     * @param newName     the new name to assign to the group
+     * @param requesterId the unique identifier of the user requesting the change
+     */
+    @Transactional
+    public void updateGroupName(Long groupId, String newName, Long requesterId) {
+        Group group = groupRepository.findById(groupId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Group not found."));
+        
+        group.setName(newName);
+        groupRepository.save(group);
+    }
+
+    /**
+     * Regenerates the invitation code for the group, invalidating any previous codes.
+     *
+     * @param groupId     the unique identifier of the group
+     * @param requesterId the unique identifier of the user requesting the regeneration
+     * @return the newly generated invitation code
+     */
+    @Transactional
+    public String regenerateInviteCode(Long groupId, Long requesterId) {
+        Group group = groupRepository.findById(groupId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Group not found."));
+        
+        String newCode = java.util.UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        group.setInviteCode(newCode);
+        groupRepository.save(group);
+        
+        return newCode;
+    }
+
+    /**
+     * Transfers administrative ownership of the group to another existing member by toggling their UserGroup flags.
+     *
+     * @param groupId        the unique identifier of the group
+     * @param currentOwnerId the unique identifier of the current owner
+     * @param newAdminId     the unique identifier of the member receiving ownership
+     */
+    @Transactional
+    public void transferOwnership(Long groupId, Long currentOwnerId, Long newAdminId) {
+        UserGroup currentOwnerGroup = userGroupRepository.findByGroupIdAndUserId(groupId, currentOwnerId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Current owner membership not found."));
+        
+        UserGroup newAdminGroup = userGroupRepository.findByGroupIdAndUserId(groupId, newAdminId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "The new administrator must be an existing member of the group."));
+        
+        currentOwnerGroup.setIsAdmin(false);
+        newAdminGroup.setIsAdmin(true);
+        
+        userGroupRepository.save(currentOwnerGroup);
+        userGroupRepository.save(newAdminGroup);
     }
 }
