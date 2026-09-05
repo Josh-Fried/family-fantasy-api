@@ -149,7 +149,7 @@ public class NflSyncService {
         }
         
         try {
-            String url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?year=" + year + "&seasontype=" + seasonType + "&week=" + week;
+            String url = "https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?year=" + year + "&seasontype=" + seasonType + "&week=" + week;
             String jsonResponse = restTemplate.getForObject(url, String.class);
             ObjectMapper mapper = new ObjectMapper();
             JsonNode root = mapper.readTree(jsonResponse);
