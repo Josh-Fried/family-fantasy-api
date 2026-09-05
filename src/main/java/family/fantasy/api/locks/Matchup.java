@@ -9,7 +9,7 @@ import jakarta.persistence.Table;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "matchups", schema = "pick_em_schema")
+@Table(name = "matchups", schema = "locks_schema")
 public class Matchup {
 
     @Id

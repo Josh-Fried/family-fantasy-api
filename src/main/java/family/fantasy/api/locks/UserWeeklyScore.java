@@ -10,7 +10,7 @@ import jakarta.persistence.*;
  * This flattens the calculation to a simple O(W) sum aggregation where W is the number of weeks.
  */
 @Entity
-@Table(name = "user_weekly_scores", schema = "pick_em_schema", uniqueConstraints = {
+@Table(name = "user_weekly_scores", schema = "locks_schema", uniqueConstraints = {
     @UniqueConstraint(columnNames = {"user_id", "season", "week_number"})
 })
 public class UserWeeklyScore {

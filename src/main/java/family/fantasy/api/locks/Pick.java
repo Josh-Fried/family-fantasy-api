@@ -4,7 +4,7 @@ import family.fantasy.api.core.User;
 import jakarta.persistence.*;
 
 @Entity
-@Table(name = "picks")
+@Table(name = "picks", schema = "locks_schema")
 public class Pick {
 
     @Id
