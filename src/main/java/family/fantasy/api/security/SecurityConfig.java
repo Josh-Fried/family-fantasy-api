@@ -106,8 +106,8 @@ public class SecurityConfig {
         // Allowed origins: Add your frontend URLs here (e.g., localhost for dev, actual domain for production)
         configuration.setAllowedOrigins(List.of(
             "http://localhost:3000", // Common React/Next.js default
-            "http://localhost:5173"  // Common Vite default
-            // You will add your deployed frontend URL here later
+            "http://localhost:5173",  // Common Vite default
+            "https://family-fantasy-alpha.vercel.app/"
         ));
         
         // Allowed HTTP methods
