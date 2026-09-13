@@ -103,8 +103,7 @@ public class GlobalAdminService {
      */
     public int forceLiveMatchupSync(Long adminUserId, String year, int week) {
         verifyGlobalAdmin(adminUserId);
-        // int seasonType = (week > 18) ? 3 : 2;
-        int seasonType = 1;
+        int seasonType = (week > 18) ? 3 : 2;
         int espnWeek = (week > 18) ? (week - 18) : week;
         return nflSyncService.fetchAndSaveFromEspn(year, seasonType, espnWeek);
     }
