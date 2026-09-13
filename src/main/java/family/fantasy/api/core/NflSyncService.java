@@ -54,8 +54,8 @@ public class NflSyncService {
      * Scheduled job that frequently triggers live scoring updates from ESPN on game days.
      * It runs every 15 minutes during standard NFL windows on Sunday, Monday, and Thursday.
      */
-    @Scheduled(cron = "0 0/15 13-23 * * SUN")
-    @Scheduled(cron = "0 0/15 17-23 * * MON,THU")
+    @Scheduled(cron = "0 0/15 13-23 * * SUN", zone = "America/Denver")
+    @Scheduled(cron = "0 0/15 17-23 * * MON,THU", zone = "America/Denver")
     public void liveScoreUpdates() {
         System.out.println("🏈 [LIVE SYNC] Waking up to update live game scores and check winners...");
         syncCurrentWeek();
@@ -66,7 +66,7 @@ public class NflSyncService {
      * It clears all relevant leaderboards and state caches to ensure fresh rendering 
      * once stat corrections and finalized outcomes are logged.
      */
-    @Scheduled(cron = "0 0 6 * * TUE")
+    @Scheduled(cron = "0 0 6 * * TUE", zone = "America/Denver")
     @Caching(evict = {
         @CacheEvict(value = "nflState", allEntries = true),
         @CacheEvict(value = "groupLeaderboards", allEntries = true),
